@@ -1,4 +1,4 @@
-#!/bin/bash -x
+#!/bin/bash 
 # All types of pollution we can download
 # https://aqs.epa.gov/aqsweb/documents/codetables/pollutant_standards.html
 
@@ -32,7 +32,7 @@ for gas in ${GAS}; do
       unzip ${FILE} && \
       rm -f ${FILE} && \
       if [ -f Hourly_${gas}_${year}.csv ]; then mv Hourly_${gas}_${year}.csv hourly_${gas}_${year}.csv; fi && \
-      chmod 644 ourly_${gas}_${year}.csv
+      chmod 644 hourly_${gas}_${year}.csv
   done
 done
 wait
