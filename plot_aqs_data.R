@@ -1,142 +1,77 @@
-# Install all packages (rarely needed more than once)
-install_packages <- function() {
-  install.packages("foreach")
-  install.packages("doParallel")
-  install.packages("ggplot2")
-  install.packages("futile.logger")
-  install.packages("lubridate")
-  install.packages("dplyr")
-  install.packages("reshape")
-}
+#!/bin/bash -x
+# All types of pollution we can download
+# https://aqs.epa.gov/aqsweb/documents/codetables/pollutant_standards.html
 
-# Prepare
-prepare_environment <- function(cores=14) {
-  require(gridExtra)
-  library(digest)
-  library(foreach)
-  library(doParallel)
-  library(ggplot2)
-  library(futile.logger)
-  library(lubridate) # work with dates
-  library(dplyr)     # data manipulation (filter, summarize, mutate)
-  library(colorspace)
-  library(reshape2)
-  flog.threshold(INFO)
-  registerDoParallel(cores)
-}
+EMAIL=XXXX@XXX.XXX
+KEY=XXXXXX
 
-sample_plot_data <- function(name="Unknown", width=960, height=480, input_data=data.frame()) {
-  # Generate output plot - save to PNG
-  
-  filename = paste(name,"_annual.png",sep = "")
-  
-  clrs <- rainbow_hcl(ncol(input_data)-1, c = 50, l = 70, start = 0)
-  
-  #input_data <- subset(input_data, date > as.POSIXct('2019-01-01 00:00:00'))
-  
-  flog.info("Creating plot filename: %s", filename)
-  
-  p <- ggplot(data=input_data,aes(x=date,y=measurement,colour=county)) + geom_point( alpha = 0.3, size=0.2)
-  p <- p + guides(colour = guide_legend(override.aes = list(title="Cities", title.position="bottom",shape = "o", alpha=1,size=5)))
-  p <- p + labs(title = paste("Graph of",name,"ouput over time"),
-                x = "Date",
-                y = "Gas measurement")
-  
-  ggsave(filename,width = width/5, height = height/5, units = "mm", dpi=300)
-}
+THISYEAR=$(date "+%Y")
+GAS="44201 42401 42101 42602"
 
-reform_airdata <- function(locations=list(), filenames=list(), cumulative_results=NA) {
-  
-  
-  intermediate_result = foreach (filename=filenames, .combine=rbind) %dopar% {
-    rawdata = read.csv(filename)
-    
-    matching_state_city = FALSE
-    for (row in 1:nrow(locations)) {
-      matching_state_city = matching_state_city | (rawdata$State.Name==locations[row,"State"] & rawdata$County.Name==locations[row,"City"] & !is.na(rawdata$Sample.Measurement) )
-    }
-    
-    subpart = rawdata[ which(matching_state_city),]
-    date_string_vec = paste(subpart$Date.Local,subpart$Time.Local)
-    datetime_vec <- as.POSIXlt(date_string_vec)
-    data_cache = data.frame("date" = datetime_vec, county=subpart$County.Name,  measurement=subpart$Sample.Measurement)
-    data_cache
-  }
-  
-  flog.info(" - extracted %s rows, %s columns from %s files [last date: %s] (intermediate: %s)", nrow(intermediate_result), ncol(intermediate_result), length(filenames), intermediate_result[nrow(intermediate_result)-1,1], colnames(intermediate_result))
-  
-  cleaned_result <- intermediate_result %>%
-    group_by(date,county) %>%
-    summarise(measurement = mean(measurement))
-  
-  flog.info(" - averaged data %s rows, %s columns (cleansed: %s)", nrow(cleaned_result), ncol(cleaned_result), colnames(cleaned_result))
-  return(cleaned_result)
-}
+# To obtain a list of States:
+# https://aqs.epa.gov/data/api/list/states?email=${EMAIL}&key=${KEY}
 
-get_airdata_cache <- function(gas=NA,locations=NA,data_dir=NA) {
-  # Load cached file (if exists), else generate
-  hash <- digest(locations,algo="md5", serialize=F)
-  cached_data_filename = paste(gas,"_",hash,".rds",sep = "")
-  if (file.exists(cached_data_filename)) {
-    flog.info("Found cache for %s gas",gas)
-    start_time <- Sys.time()
-    gas_compare <- readRDS(cached_data_filename)
-    end_time <- Sys.time()
-    flog.info("Cache load for %s gas took %0.2f seconds (ncol: %s, nrows: %s)",gas,end_time-start_time,ncol(gas_compare),nrow(gas_compare))
-  }
-  else {
-    gas_compare <- NA
-    input_filenames = get_hourly_airdata(gas=gas,dir=data_dir)
-    
-    # For each location - cache it
-    start_time <- Sys.time()
-    
-    gas_compare <- reform_airdata(locations=locations, filenames=input_filenames, cumulative_results=gas_compare)
-    end_time <- Sys.time()
-    saveRDS(gas_compare, file = cached_data_filename)
-    flog.info("Cache generation for %s gas took %0.2f seconds (ncol: %s, nrows: %s)",gas,end_time-start_time,ncol(gas_compare),nrow(gas_compare))
-  }
-  
-  return(gas_compare)
-}
+# To obtain a list of Counties in that State
+# https://aqs.epa.gov/data/api/list/countiesByState?email=${EMAIL}&key=${KEY}&state=${STATE}
 
-get_hourly_airdata <- function(gas=0000,dir=NA) {
-  
-  if (!is.na(dir)) {
-    setwd(dir)
-  }
-  
-  pattern = paste(".*_",gas,"_.*.csv",sep = "")
-  filenames <- list.files(getwd(), pattern=pattern, full.names=TRUE)
-}
+STATECITY="06:037 36:005"
+URLPRE="https://aqs.epa.gov/aqsweb/airdata/hourly"
+for gas in ${GAS}; do
+  for year in $(seq 1980 ${THISYEAR}); do
+    if [ -f hourly_${gas}_${year}.csv ]; then
+      echo "Data for ${gas} in year ${year} already downloaded"
+      continue
+    fi
 
+    URL=${URLPRE}_${gas}_${year}.zip
+    FILE=${URL##*/}
 
-##############################################
-##############################################
+    # Download the file and unzip
+    echo $URL
+    curl -s ${URL} --output ${FILE} && \
+      unzip ${FILE} && \
+      rm -f ${FILE} && \
+      if [ -f Hourly_${gas}_${year}.csv ]; then mv Hourly_${gas}_${year}.csv hourly_${gas}_${year}.csv; fi && \
+      chmod 644 hourly_${gas}_${year}.csv
+  done
+done
+wait
 
-main <- function() {
-  #install_packages()
-  prepare_environment(cores=14)
-  
-  
-  locations = noquote(matrix(c("California","Los Angeles",1002,"New York","Bronx",0003),ncol=3,byrow=TRUE))
-  colnames(locations) <- c("State","City","Site")
-  
-  gasses = noquote(matrix(c("Ozone",44201,"Sulfur dioxide",42401,"Carbon monoxide",42101,"Nitrogen dioxide",42602),ncol=2,byrow=TRUE))
-  colnames(gasses) <- c("Name","Code")
-  
-  
-  
-  # Iterate over gasses and generate one vector
-  for (row in 1:nrow(gasses)) {
-    # Get the data from the requested files
-    gas_compare <- get_airdata_cache(gas=gasses[row,"Code"],locations=locations,data_dir="/home/bijan/EPA")
-    
-    # Generate output plot - save to PNG
-    start_time <- Sys.time()
-    sample_plot_data(name=gasses[row,"Name"],input_data=gas_compare)
-    end_time <- Sys.time()
-    flog.info("Took %0.2f seconds to graph %s", end_time-start_time, gasses[row,"Name"])
-  }
-}
+# Find jq or fail
+which jq > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+  exit 1
+fi
 
+TODAY=$(date +"%Y%m%d")
+RANGES="20190701:20191231:2019 ${THISYEAR}0101:${TODAY}:${THISYEAR}"
+
+for gas in ${GAS}; do
+  for state_city in ${STATECITY}; do
+
+    state="$(echo ${state_city} | cut -d ':' -f 1)"
+    city="$(echo ${state_city} | cut -d ':' -f 2)"
+
+    for date_range in ${RANGES}; do
+
+        bdate="$(echo ${date_range} | cut -d ':' -f 1)"
+        edate="$(echo ${date_range} | cut -d ':' -f 2)"
+        year="$(echo ${date_range} | cut -d ':' -f 3)"
+
+        # If file genearated - continue
+        if [ -f hourly_${gas}_${state}_${year}.csv ]; then
+            continue
+        fi
+
+        tmpfile=$(mktemp)
+        URL="https://aqs.epa.gov/data/api/sampleData/byCounty?email=${EMAIL}&key=${KEY}&param=${gas}&bdate=${bdate}&edate=${edate}&state=${state}&county=${city}"
+	OFILE="hourly_${gas}_${state}_${city}_${year}.csv"
+
+        curl -X GET ${URL} -o ${tmpfile} &&
+            jq -r -f aqs_epa.jq ${tmpfile} >> ${OFILE} &&
+	        sed -i "1 s/state_code/State Code/g; s/county_code/County Code/g; s/site_number/Site Num/g; s/parameter_code/Parameter Code/g; s/poc/POC/g; s/latitude/Latitude/g; s/longitude/Longitude/g; s/datum/Datum/g; s/parameter/Parameter Name/g; s/date_local/Date Local/g; s/time_local/Time Local/g; s/date_gmt/Date GMT/g; s/time_gmt/Time GMT/g; s/sample_measurement/Sample Measurement/g; s/units_of_measure/Units of Measure/g; s/sample_duration/MDL/g; s/uncertainty/Uncertainty/g; s/qualifier/Qualifier/g; s/method_type/Method Type/g; s/method_code/Method Code/g; s/method/Method Name/g; s/state/State Name/g; s/county/County Name/g; s/date_of_last_change/Date of Last Change/g;" ${OFILE}
+    done
+  done
+done
+
+wait
