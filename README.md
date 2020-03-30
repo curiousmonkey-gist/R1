@@ -6,7 +6,7 @@ Decode / Plot AQS EPA data
 Ensure you have set `EMAIL` and `KEY` correctly.
 
 ```
-> ./decode_data
+> ./download_aqs_data
 ```
 
 ## Plot
