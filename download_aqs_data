@@ -1,0 +1,77 @@
+#!/bin/bash -x
+# All types of pollution we can download
+# https://aqs.epa.gov/aqsweb/documents/codetables/pollutant_standards.html
+
+EMAIL=XXXX@XXX.XXX
+KEY=XXXXXX
+
+THISYEAR=$(date "+%Y")
+GAS="44201 42401 42101 42602"
+
+# To obtain a list of States:
+# https://aqs.epa.gov/data/api/list/states?email=${EMAIL}&key=${KEY}
+
+# To obtain a list of Counties in that State
+# https://aqs.epa.gov/data/api/list/countiesByState?email=${EMAIL}&key=${KEY}&state=${STATE}
+
+STATECITY="06:037 36:005"
+URLPRE="https://aqs.epa.gov/aqsweb/airdata/hourly"
+for gas in ${GAS}; do
+  for year in $(seq 1980 ${THISYEAR}); do
+    if [ -f hourly_${gas}_${year}.csv ]; then
+      echo "Data for ${gas} in year ${year} already downloaded"
+      continue
+    fi
+
+    URL=${URLPRE}_${gas}_${year}.zip
+    FILE=${URL##*/}
+
+    # Download the file and unzip
+    echo $URL
+    curl -s ${URL} --output ${FILE} && \
+      unzip ${FILE} && \
+      rm -f ${FILE} && \
+      if [ -f Hourly_${gas}_${year}.csv ]; then mv Hourly_${gas}_${year}.csv hourly_${gas}_${year}.csv; fi && \
+      chmod 644 ourly_${gas}_${year}.csv
+  done
+done
+wait
+
+# Find jq or fail
+which jq > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+  exit 1
+fi
+
+TODAY=$(date +"%Y%m%d")
+RANGES="20190701:20191231:2019 ${THISYEAR}0101:${TODAY}:${THISYEAR}"
+
+for gas in ${GAS}; do
+  for state_city in ${STATECITY}; do
+
+    state="$(echo ${state_city} | cut -d ':' -f 1)"
+    city="$(echo ${state_city} | cut -d ':' -f 2)"
+
+    for date_range in ${RANGES}; do
+
+        bdate="$(echo ${date_range} | cut -d ':' -f 1)"
+        edate="$(echo ${date_range} | cut -d ':' -f 2)"
+        year="$(echo ${date_range} | cut -d ':' -f 3)"
+
+        # If file genearated - continue
+        if [ -f hourly_${gas}_${state}_${year}.csv ]; then
+            continue
+        fi
+
+        tmpfile=$(mktemp)
+        URL="https://aqs.epa.gov/data/api/sampleData/byCounty?email=${EMAIL}&key=${KEY}&param=${gas}&bdate=${bdate}&edate=${edate}&state=${state}&county=${city}"
+	OFILE="hourly_${gas}_${state}_${city}_${year}.csv"
+
+        curl -X GET ${URL} -o ${tmpfile} &&
+            jq -r -f aqs_epa.jq ${tmpfile} >> ${OFILE} &&
+	        sed -i "1 s/state_code/State Code/g; s/county_code/County Code/g; s/site_number/Site Num/g; s/parameter_code/Parameter Code/g; s/poc/POC/g; s/latitude/Latitude/g; s/longitude/Longitude/g; s/datum/Datum/g; s/parameter/Parameter Name/g; s/date_local/Date Local/g; s/time_local/Time Local/g; s/date_gmt/Date GMT/g; s/time_gmt/Time GMT/g; s/sample_measurement/Sample Measurement/g; s/units_of_measure/Units of Measure/g; s/sample_duration/MDL/g; s/uncertainty/Uncertainty/g; s/qualifier/Qualifier/g; s/method_type/Method Type/g; s/method_code/Method Code/g; s/method/Method Name/g; s/state/State Name/g; s/county/County Name/g; s/date_of_last_change/Date of Last Change/g;" ${OFILE}
+    done
+  done
+done
+
+wait
