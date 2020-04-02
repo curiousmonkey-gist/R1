@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash -x
 # All types of pollution we can download
 # https://aqs.epa.gov/aqsweb/documents/codetables/pollutant_standards.html
 
@@ -6,6 +6,8 @@ EMAIL=XXXX@XXX.XXX
 KEY=XXXXXX
 
 THISYEAR=$(date "+%Y")
+
+# The list of gasses we'd like to see reporting on
 GAS="44201 42401 42101 42602"
 
 # To obtain a list of States:
@@ -14,7 +16,14 @@ GAS="44201 42401 42101 42602"
 # To obtain a list of Counties in that State
 # https://aqs.epa.gov/data/api/list/countiesByState?email=${EMAIL}&key=${KEY}&state=${STATE}
 
-STATECITY="06:037 36:005"
+# Here are the two cities we'd like to compare - "Los Angeles, CA" and "Bronx, NY"
+# We only need this for the incremental data from the last files uploaded. To extract this
+# data we need access to the API below
+
+STATECITY="06:037 36:005" # Los Angeles, Bronx
+#STATECITY="06:037 36:061"  # Los Angeles, New York
+
+# Iterate over gassses and year
 URLPRE="https://aqs.epa.gov/aqsweb/airdata/hourly"
 for gas in ${GAS}; do
   for year in $(seq 1980 ${THISYEAR}); do
@@ -32,7 +41,7 @@ for gas in ${GAS}; do
       unzip ${FILE} && \
       rm -f ${FILE} && \
       if [ -f Hourly_${gas}_${year}.csv ]; then mv Hourly_${gas}_${year}.csv hourly_${gas}_${year}.csv; fi && \
-      chmod 644 hourly_${gas}_${year}.csv
+      chmod 644 hourly_${gas}_${year}.csv &
   done
 done
 wait
@@ -69,7 +78,7 @@ for gas in ${GAS}; do
 
         curl -X GET ${URL} -o ${tmpfile} &&
             jq -r -f aqs_epa.jq ${tmpfile} >> ${OFILE} &&
-	        sed -i "1 s/state_code/State Code/g; s/county_code/County Code/g; s/site_number/Site Num/g; s/parameter_code/Parameter Code/g; s/poc/POC/g; s/latitude/Latitude/g; s/longitude/Longitude/g; s/datum/Datum/g; s/parameter/Parameter Name/g; s/date_local/Date Local/g; s/time_local/Time Local/g; s/date_gmt/Date GMT/g; s/time_gmt/Time GMT/g; s/sample_measurement/Sample Measurement/g; s/units_of_measure/Units of Measure/g; s/sample_duration/MDL/g; s/uncertainty/Uncertainty/g; s/qualifier/Qualifier/g; s/method_type/Method Type/g; s/method_code/Method Code/g; s/method/Method Name/g; s/state/State Name/g; s/county/County Name/g; s/date_of_last_change/Date of Last Change/g;" ${OFILE}
+	        sed -i "1 s/state_code/State Code/g; s/county_code/County Code/g; s/site_number/Site Num/g; s/parameter_code/Parameter Code/g; s/poc/POC/g; s/latitude/Latitude/g; s/longitude/Longitude/g; s/datum/Datum/g; s/parameter/Parameter Name/g; s/date_local/Date Local/g; s/time_local/Time Local/g; s/date_gmt/Date GMT/g; s/time_gmt/Time GMT/g; s/sample_measurement/Sample Measurement/g; s/units_of_measure/Units of Measure/g; s/sample_duration/MDL/g; s/uncertainty/Uncertainty/g; s/qualifier/Qualifier/g; s/method_type/Method Type/g; s/method_code/Method Code/g; s/method/Method Name/g; s/state/State Name/g; s/county/County Name/g; s/date_of_last_change/Date of Last Change/g;" ${OFILE} &
     done
   done
 done
