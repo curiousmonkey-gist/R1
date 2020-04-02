@@ -41,19 +41,33 @@ prepare_environment <- function(cores=14) {
 sample_plot_data <- function(name="Unknown", width=960, height=480, input_data=data.frame()) {
   # Generate output plot - save to PNG
 
-  filename = paste(name,"_annual.png",sep = "")
-
-  clrs <- rainbow_hcl(ncol(input_data)-1, c = 50, l = 70, start = 0)
-
-  #input_data <- subset(input_data, date > as.POSIXct('2019-01-01 00:00:00'))
+  
+  filename = paste(sub(" ","_", name),"_annual.png",sep = "")
+  
+  theme_set(theme_minimal()) 
+  
+  #input_data <- subset(input_data, date > as.POSIXct('2018-01-01 00:00:00'))
+  
+  # Add a column representing the week
+  input_data <- input_data %>%
+    mutate(week = as.POSIXct(floor_date(as.Date(date) - 1, "weeks") + 1))
+  
+  # Create dataset with week start as input
+  input_data_week <- input_data %>%
+    group_by(week,county) %>%
+    summarise(avg_over_wk = median(measurement))
 
   flog.info("Creating plot filename: %s", filename)
 
-  p <- ggplot(data=input_data,aes(x=date,y=measurement,colour=county)) + geom_point( alpha = 0.3, size=0.2)
-  p <- p + guides(colour = guide_legend(override.aes = list(title="Cities", title.position="bottom",shape = "o", alpha=1,size=5)))
+  p <- ggplot(data=input_data,aes(x=date,y=measurement,colour=county))
+  p <- p + geom_point(alpha = 0.05, size=0.05, shape=".")
   p <- p + labs(title = paste("Graph of",name,"ouput over time"),
                 x = "Date",
                 y = "Gas measurement")
+  p <- p + guides(colour = guide_legend(override.aes = list(title="Cities", title.position="bottom",shape = "o", alpha=1,size=5)))
+  p <- p + geom_line(data=input_data_week,aes(x=week,y=avg_over_wk,colour=county),linetype = "solid", size=0.5,alpha=0.7)
+  p <- p + ylim(0, 1.1*max(input_data_week$avg_over_wk))
+  
 
   ggsave(filename,width = width/5, height = height/5, units = "mm", dpi=300)
 }
@@ -67,7 +81,7 @@ reform_airdata <- function(locations=list(), filenames=list()) {
 
 
   intermediate_result = foreach (filename=filenames, .combine=rbind) %dopar% {
-    rawdata = read.csv(filename)
+    rawdata = read.csv(filename,header=TRUE,blank.lines.skip = TRUE,na.strings="",stringsAsFactors=FALSE, skipNul = TRUE)
 
     matching_state_city = FALSE
     for (row in 1:nrow(locations)) {
@@ -77,13 +91,14 @@ reform_airdata <- function(locations=list(), filenames=list()) {
     subpart = rawdata[ which(matching_state_city),]
     date_string_vec = paste(subpart$Date.Local,subpart$Time.Local)
     datetime_vec <- as.POSIXlt(date_string_vec)
-    data_cache = data.frame("date" = datetime_vec, county=subpart$County.Name,  measurement=subpart$Sample.Measurement)
+    data_cache = data.frame("date" = datetime_vec, county=subpart$County.Name,  measurement=subpart$Sample.Measurement, stringsAsFactors = FALSE)
     data_cache
   }
 
   flog.info(" - extracted %s rows, %s columns from %s files [last date: %s] (intermediate: %s)", nrow(intermediate_result), ncol(intermediate_result), length(filenames), intermediate_result[nrow(intermediate_result)-1,1], colnames(intermediate_result))
 
   cleaned_result <- intermediate_result %>%
+    na.omit() %>%
     group_by(date,county) %>%
     summarise(measurement = mean(measurement))
 
@@ -102,7 +117,7 @@ get_airdata_cache <- function(gas=NA,locations=NA,data_dir=NA) {
   hash <- digest(locations,algo="md5", serialize=F)
   cached_data_filename = paste(gas,"_",hash,".rds",sep = "")
   if (file.exists(cached_data_filename)) {
-    flog.info("Found cache for %s gas",gas)
+    flog.info("Found cache for %s gas [file: %s]",gas, cached_data_filename)
     start_time <- Sys.time()
     gas_compare <- readRDS(cached_data_filename)
     end_time <- Sys.time()
@@ -111,10 +126,9 @@ get_airdata_cache <- function(gas=NA,locations=NA,data_dir=NA) {
   else {
     gas_compare <- NA
     input_filenames = get_hourly_airdata(gas=gas,dir=data_dir)
-
-    # For each location - cache it
+    flog.info("Failed to find cache for %s gas [file: %s]",gas, cached_data_filename)
+    
     start_time <- Sys.time()
-
     gas_compare <- reform_airdata(locations=locations, filenames=input_filenames)
     end_time <- Sys.time()
     saveRDS(gas_compare, file = cached_data_filename)
@@ -151,6 +165,7 @@ main <- function() {
 
 
   locations = noquote(matrix(c("California","Los Angeles",1002,"New York","Bronx",0003),ncol=3,byrow=TRUE))
+  #locations = noquote(matrix(c("California","Los Angeles",1002,"New York","New York",0135),ncol=3,byrow=TRUE))
   colnames(locations) <- c("State","City","Site")
 
   gasses = noquote(matrix(c("Ozone",44201,"Sulfur dioxide",42401,"Carbon monoxide",42101,"Nitrogen dioxide",42602),ncol=2,byrow=TRUE))
